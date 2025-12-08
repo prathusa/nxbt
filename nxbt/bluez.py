@@ -8,6 +8,8 @@ import random
 from pathlib import Path
 
 import dbus
+import dbus.service
+from dbus.mainloop.glib import DBusGMainLoop
 
 
 SERVICE_NAME = "org.bluez"
@@ -15,6 +17,8 @@ BLUEZ_OBJECT_PATH = "/org/bluez"
 ADAPTER_INTERFACE = SERVICE_NAME + ".Adapter1"
 PROFILEMANAGER_INTERFACE = SERVICE_NAME + ".ProfileManager1"
 DEVICE_INTERFACE = SERVICE_NAME + ".Device1"
+AGENT_INTERFACE = SERVICE_NAME + ".Agent1"
+AGENTMANAGER_INTERFACE = SERVICE_NAME + ".AgentManager1"
 
 
 def find_object_path(bus, service_name, interface_name, object_name=None):
@@ -359,6 +363,67 @@ def disconnect_devices_by_alias(alias, created_bus=None):
         bus.close()
 
 
+class AutoAcceptAgent(dbus.service.Object):
+    """A DBus Agent that automatically accepts all pairing and authorization requests.
+    This is needed to handle incoming connections from the Nintendo Switch without
+    requiring manual intervention via bluetoothctl.
+    """
+
+    def __init__(self, bus, path):
+        super().__init__(bus, path)
+        self.logger = logging.getLogger('nxbt')
+
+    @dbus.service.method(AGENT_INTERFACE, in_signature="", out_signature="")
+    def Release(self):
+        """Called when the agent is unregistered."""
+        self.logger.debug("Agent released")
+
+    @dbus.service.method(AGENT_INTERFACE, in_signature="os", out_signature="")
+    def AuthorizeService(self, device, uuid):
+        """Automatically authorize service requests."""
+        self.logger.debug(f"Authorizing service for device {device}")
+        return
+
+    @dbus.service.method(AGENT_INTERFACE, in_signature="o", out_signature="s")
+    def RequestPinCode(self, device):
+        """Return a pin code for pairing."""
+        self.logger.debug(f"RequestPinCode for {device}")
+        return "0000"
+
+    @dbus.service.method(AGENT_INTERFACE, in_signature="o", out_signature="u")
+    def RequestPasskey(self, device):
+        """Return a passkey for pairing."""
+        self.logger.debug(f"RequestPasskey for {device}")
+        return dbus.UInt32(0)
+
+    @dbus.service.method(AGENT_INTERFACE, in_signature="ouq", out_signature="")
+    def DisplayPasskey(self, device, passkey, entered):
+        """Display passkey (no-op for auto-accept)."""
+        self.logger.debug(f"DisplayPasskey: {passkey} for {device}")
+
+    @dbus.service.method(AGENT_INTERFACE, in_signature="os", out_signature="")
+    def DisplayPinCode(self, device, pincode):
+        """Display pin code (no-op for auto-accept)."""
+        self.logger.debug(f"DisplayPinCode: {pincode} for {device}")
+
+    @dbus.service.method(AGENT_INTERFACE, in_signature="ou", out_signature="")
+    def RequestConfirmation(self, device, passkey):
+        """Automatically confirm pairing requests."""
+        self.logger.debug(f"Auto-confirming pairing for {device}")
+        return
+
+    @dbus.service.method(AGENT_INTERFACE, in_signature="o", out_signature="")
+    def RequestAuthorization(self, device):
+        """Automatically authorize connection requests."""
+        self.logger.debug(f"Auto-authorizing connection for {device}")
+        return
+
+    @dbus.service.method(AGENT_INTERFACE, in_signature="", out_signature="")
+    def Cancel(self):
+        """Handle cancellation of requests."""
+        self.logger.debug("Request cancelled")
+
+
 class BlueZ():
     """Exposes the BlueZ D-Bus API as a Python object.
     """
@@ -366,6 +431,9 @@ class BlueZ():
     def __init__(self, adapter_path="/org/bluez/hci0"):
 
         self.logger = logging.getLogger('nxbt')
+
+        # Initialize DBus main loop for agent support
+        DBusGMainLoop(set_as_default=True)
 
         self.bus = dbus.SystemBus()
         self.device_path = adapter_path
@@ -402,6 +470,11 @@ class BlueZ():
                 SERVICE_NAME,
                 self.device_path),
             ADAPTER_INTERFACE)
+
+        # Register auto-accept agent for handling pairing/authorization
+        self.agent = None
+        self.agent_path = "/nxbt/agent"
+        self._register_agent()
 
     @property
     def address(self):
@@ -526,6 +599,21 @@ class BlueZ():
 
         dbus_value = dbus.UInt32(value)
         self.device.Set(ADAPTER_INTERFACE, "PairableTimeout", dbus_value)
+
+    def trust_device(self, device_path):
+        """Marks a device as trusted to allow automatic connections.
+
+        :param device_path: The D-Bus path to the device
+        :type device_path: string
+        """
+        try:
+            device_props = dbus.Interface(
+                self.bus.get_object(SERVICE_NAME, device_path),
+                "org.freedesktop.DBus.Properties")
+            device_props.Set(DEVICE_INTERFACE, "Trusted", dbus.Boolean(True))
+            self.logger.debug(f"Device {device_path} marked as trusted")
+        except dbus.exceptions.DBusException as e:
+            self.logger.debug(f"Failed to trust device: {e}")
 
     @property
     def discoverable(self):
@@ -686,11 +774,50 @@ class BlueZ():
 
         self.profile_manager.UnregisterProfile(profile)
 
+    def _register_agent(self):
+        """Registers an auto-accept agent to handle pairing and authorization requests."""
+        try:
+            # Create and register the agent
+            self.agent = AutoAcceptAgent(self.bus, self.agent_path)
+            
+            # Get the agent manager
+            agent_manager = dbus.Interface(
+                self.bus.get_object(SERVICE_NAME, "/org/bluez"),
+                AGENTMANAGER_INTERFACE)
+            
+            # Register the agent with NoInputNoOutput capability
+            agent_manager.RegisterAgent(self.agent_path, "NoInputNoOutput")
+            
+            # Request to make this the default agent
+            agent_manager.RequestDefaultAgent(self.agent_path)
+            
+            self.logger.debug("Auto-accept agent registered successfully")
+        except dbus.exceptions.DBusException as e:
+            # Agent might already be registered, which is fine
+            self.logger.debug(f"Agent registration: {e}")
+
+    def _unregister_agent(self):
+        """Unregisters the auto-accept agent."""
+        if self.agent:
+            try:
+                agent_manager = dbus.Interface(
+                    self.bus.get_object(SERVICE_NAME, "/org/bluez"),
+                    AGENTMANAGER_INTERFACE)
+                agent_manager.UnregisterAgent(self.agent_path)
+                self.logger.debug("Agent unregistered")
+            except dbus.exceptions.DBusException as e:
+                self.logger.debug(f"Agent unregistration: {e}")
+            finally:
+                self.agent = None
+
     def reset(self):
         """Restarts the Bluetooth Service
 
         :raises Exception: If the bluetooth service can't be restarted
         """
+
+        # Unregister agent before restart
+        self._unregister_agent()
 
         result = subprocess.run(
             ["systemctl", "restart", "bluetooth"],
@@ -710,6 +837,9 @@ class BlueZ():
                 SERVICE_NAME,
                 BLUEZ_OBJECT_PATH),
             PROFILEMANAGER_INTERFACE)
+
+        # Re-register agent after restart
+        self._register_agent()
 
     def get_discovered_devices(self):
         """Gets a dict of all discovered (or previously discovered
@@ -917,3 +1047,9 @@ class BlueZ():
                     conn_devices.append(path)
 
         return conn_devices
+
+    def close(self):
+        """Cleanup method to unregister agent and close bus connection."""
+        self._unregister_agent()
+        if hasattr(self, 'bus') and self.bus:
+            self.bus.close()

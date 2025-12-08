@@ -385,6 +385,12 @@ class ControllerServer():
 
                 self._crw_running = False
 
+                # Trust the connected Switch device for future connections
+                switch_address = itr.getpeername()[0]
+                switch_device_path = self.bt.find_device_by_address(switch_address)
+                if switch_device_path:
+                    self.bt.trust_device(switch_device_path)
+
                 # Send an empty input report to the Switch to prompt a reply
                 self.protocol.process_commands(None)
                 msg = self.protocol.get_report()
@@ -508,4 +514,11 @@ class ControllerServer():
         return itr, ctrl
 
     def _on_exit(self):
-        self.bt.reset_address()
+        try:
+            self.bt.close()
+        except Exception:
+            pass
+        try:
+            self.bt.reset_address()
+        except Exception:
+            pass
