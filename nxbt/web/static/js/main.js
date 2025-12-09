@@ -212,6 +212,15 @@ socket.on('create_pro_controller', function(index) {
     checkForLoadInterval = setInterval(checkForLoad, 1000);
 });
 
+socket.on('reconnect_controller', function(index) {
+    NXBT_CONTROLLER_INDEX = index;
+    // Show loader during reconnection
+    HTML_CONTROLLER_CONFIG.classList.add('hidden');
+    HTML_LOADER.classList.remove('hidden');
+    HTML_LOADER_TEXT.innerHTML = "Reconnecting...";
+    checkForLoadInterval = setInterval(checkForLoad, 1000);
+});
+
 socket.on('error', function(errorMessage) {
     displayError(errorMessage);
 });
@@ -384,6 +393,11 @@ function createProController() {
     socket.emit('web_create_pro_controller');
 }
 
+function reconnectController() {
+    // Seamlessly reconnect without going through pairing
+    socket.emit('web_reconnect_controller');
+}
+
 function shutdownController() {
     if (STATE[NXBT_CONTROLLER_INDEX]) {
         socket.emit('shutdown', NXBT_CONTROLLER_INDEX);
@@ -391,7 +405,7 @@ function shutdownController() {
 }
 
 function recreateProController() {
-    socket.emit('create_pro_controller');
+    socket.emit('web_create_pro_controller');
 }
 
 function restartController() {

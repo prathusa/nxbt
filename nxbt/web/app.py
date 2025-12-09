@@ -158,6 +158,39 @@ def on_create_controller():
         emit('error', str(e))
 
 
+@sio.on('web_reconnect_controller')
+def on_reconnect_controller():
+    """Seamlessly reconnect the controller without going through pairing"""
+    print("Reconnect Controller")
+
+    try:
+        nx = get_nxbt()
+        
+        # Remove the old controller
+        with user_info_lock:
+            if request.sid in USER_INFO and "controller_index" in USER_INFO[request.sid]:
+                old_index = USER_INFO[request.sid]["controller_index"]
+                try:
+                    nx.remove_controller(old_index)
+                except (ValueError, KeyError):
+                    pass
+        
+        # Create new controller with reconnect address (seamless reconnection)
+        reconnect_addresses = nx.get_switch_addresses()
+        if not reconnect_addresses:
+            emit('error', 'No Switch addresses found. Please pair first using "Create Controller".')
+            return
+            
+        index = nx.create_controller(PRO_CONTROLLER, reconnect_address=reconnect_addresses)
+
+        with user_info_lock:
+            USER_INFO[request.sid]["controller_index"] = index
+
+        emit('reconnect_controller', index)
+    except Exception as e:
+        emit('error', str(e))
+
+
 @sio.on('input')
 def handle_input(message):
     # print("Webapp Input", time.perf_counter())
