@@ -50,11 +50,19 @@ def on_connect():
 
 @sio.on('state')
 def on_state():
-    state_proxy = nxbt.state.copy()
-    state = {}
-    for controller in state_proxy.keys():
-        state[controller] = state_proxy[controller].copy()
-    emit('state', state)
+    try:
+        state_proxy = nxbt.state.copy()
+        state = {}
+        for controller in state_proxy.keys():
+            state[controller] = state_proxy[controller].copy()
+        emit('state', state)
+    except (FileNotFoundError, EOFError, ConnectionRefusedError, BrokenPipeError) as e:
+        # Multiprocessing manager has died - return empty state
+        print(f"NXBT manager connection lost: {e}")
+        emit('state', {})
+    except Exception as e:
+        print(f"Error getting state: {e}")
+        emit('state', {})
 
 
 @sio.on('disconnect')
@@ -94,6 +102,9 @@ def check_controller_health(index):
             emit('controller_health', {'index': index, 'state': state, 'exists': True})
         else:
             emit('controller_health', {'index': index, 'state': None, 'exists': False})
+    except (FileNotFoundError, EOFError, ConnectionRefusedError, BrokenPipeError):
+        # Manager died - controller doesn't exist
+        emit('controller_health', {'index': index, 'state': 'manager_dead', 'exists': False})
     except Exception as e:
         emit('error', f'Health check error: {str(e)}')
 
@@ -139,6 +150,9 @@ def handle_input(message):
                 return
         
         nxbt.set_controller_input(index, input_packet)
+    except (FileNotFoundError, EOFError, ConnectionRefusedError, BrokenPipeError):
+        # Manager died - silently ignore input
+        pass
     except ValueError as e:
         emit('controller_error', {'index': message[0] if message else None, 'error': str(e)})
     except Exception as e:
@@ -160,6 +174,9 @@ def handle_macro(message):
                 return
         
         nxbt.macro(index, macro)
+    except (FileNotFoundError, EOFError, ConnectionRefusedError, BrokenPipeError):
+        # Manager died - emit error
+        emit('controller_error', {'index': message[0] if message else None, 'error': 'NXBT manager connection lost'})
     except ValueError as e:
         emit('controller_error', {'index': message[0] if message else None, 'error': str(e)})
     except Exception as e:
