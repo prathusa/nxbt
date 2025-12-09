@@ -8,7 +8,8 @@ from .cert import generate_cert
 from ..nxbt import Nxbt, PRO_CONTROLLER
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
-import eventlet
+from gevent import pywsgi
+from geventwebsocket.handler import WebSocketHandler
 
 
 app = Flask(__name__,
@@ -253,10 +254,15 @@ def start_web_app(ip='0.0.0.0', port=8000, usessl=False, cert_path=None):
             with open(key_path, "wb") as f:
                 f.write(key)
 
-        eventlet.wsgi.server(eventlet.wrap_ssl(eventlet.listen((ip, port)),
-            certfile=cert_path, keyfile=key_path), app)
+        server = pywsgi.WSGIServer((ip, port), app, 
+                                    handler_class=WebSocketHandler,
+                                    keyfile=key_path, 
+                                    certfile=cert_path)
+        server.serve_forever()
     else:
-        eventlet.wsgi.server(eventlet.listen((ip, port)), app)
+        server = pywsgi.WSGIServer((ip, port), app, 
+                                    handler_class=WebSocketHandler)
+        server.serve_forever()
 
 
 if __name__ == "__main__":
