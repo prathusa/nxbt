@@ -165,6 +165,7 @@ class ControllerServer():
                 if msg[3:] != self.cached_msg:
                     itr.sendall(msg)
                     self.cached_msg = msg[3:]
+                    self.tick = 0  # Reset tick on new packet
                 # Send a blank packet every so often to keep the Switch
                 # from disconnecting from the controller.
                 elif self.tick >= 132:

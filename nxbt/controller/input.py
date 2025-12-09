@@ -102,6 +102,11 @@ class InputParser():
         # that would close the "Change Grip/Order" menu
         self.exited_grip_order_menu = False
 
+        # Cooldown timer to prevent rapid macro execution
+        # that can cause disconnections
+        self.macro_cooldown_time = 0.1  # 100ms between macros
+        self.last_macro_end_time = 0
+
     def buffer_macro(self, macro, macro_id):
 
         # Doesn't have any info
@@ -186,10 +191,18 @@ class InputParser():
               self.current_macro_commands):
             # Check if we can start on a new macro.
             if not self.current_macro and self.macro_buffer:
-                # Preprocess command lines of current macro
-                macro = self.macro_buffer.pop(0)
-                self.current_macro = self.parse_macro(macro[0])
-                self.current_macro_id = macro[1]
+                # Check if enough time has passed since the last macro ended
+                current_time = perf_counter()
+                time_since_last_macro = current_time - self.last_macro_end_time
+                
+                if time_since_last_macro >= self.macro_cooldown_time:
+                    # Preprocess command lines of current macro
+                    macro = self.macro_buffer.pop(0)
+                    self.current_macro = self.parse_macro(macro[0])
+                    self.current_macro_id = macro[1]
+                else:
+                    # Not enough time has passed, return without processing
+                    return
 
             # Check if we can load the next set of commands
             if not self.current_macro_commands and self.current_macro:
@@ -213,6 +226,8 @@ class InputParser():
                     finished = state["finished_macros"]
                     finished.append(self.current_macro_id)
                     state["finished_macros"] = finished
+                    # Record the time when this macro ended
+                    self.last_macro_end_time = perf_counter()
 
     def parse_controller_input(self, controller_input):
 
