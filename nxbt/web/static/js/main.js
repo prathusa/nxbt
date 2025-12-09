@@ -225,6 +225,36 @@ socket.on('error', function(errorMessage) {
     displayError(errorMessage);
 });
 
+socket.on('manager_reconnected', function(data) {
+    console.log("NXBT manager reconnected:", data.message);
+    displayError("NXBT Manager Reconnected: " + data.message);
+    // Clear the current controller index since it's invalid now
+    NXBT_CONTROLLER_INDEX = false;
+    // Show controller selection again
+    HTML_CONTROLLER_CONFIG.classList.add('hidden');
+    HTML_LOADER.classList.add('hidden');
+    HTML_CONTROLLER_SELECTION.classList.remove('hidden');
+});
+
+socket.on('manager_dead', function(data) {
+    console.error("NXBT manager is dead:", data.error);
+    displayError("NXBT Manager Failed: " + data.error + " - Please restart the webapp");
+    changeStatusIndicatorState("indicator-red", "MANAGER DEAD");
+});
+
+socket.on('controller_crashed', function(index) {
+    console.error("Controller crashed:", index);
+    displayError("Controller #" + index + " has crashed. Please recreate it.");
+    if (index === NXBT_CONTROLLER_INDEX) {
+        changeStatusIndicatorState("indicator-red", "CRASHED");
+    }
+});
+
+socket.on('controller_error', function(data) {
+    console.error("Controller error:", data);
+    displayError("Controller Error: " + data.error);
+});
+
 /**********************************************/
 /* Listeners and Startup Functionality */
 /**********************************************/
