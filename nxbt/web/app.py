@@ -19,16 +19,31 @@ app = Flask(__name__,
 # Initialize nxbt as None - will be created on first use
 nxbt = None
 nxbt_lock = RLock()
+nxbt_init_failed = False
 
 def get_nxbt():
     """Get or create the Nxbt instance with proper error handling"""
-    global nxbt
+    global nxbt, nxbt_init_failed
+    
+    if nxbt_init_failed:
+        raise RuntimeError("NXBT initialization previously failed - restart the webapp to retry")
+    
     with nxbt_lock:
         if nxbt is None:
             try:
                 nxbt = Nxbt()
+            except FileNotFoundError as e:
+                nxbt_init_failed = True
+                print(f"ERROR: Failed to initialize NXBT - multiprocessing manager socket error: {e}")
+                print("This usually means:")
+                print("  1. The /tmp directory has permission issues")
+                print("  2. The /tmp directory is full")
+                print("  3. There's a stale socket file from a previous crash")
+                print("\nTry running: sudo rm -f /tmp/pymp-* && sudo chmod 1777 /tmp")
+                raise
             except Exception as e:
-                print(f"Failed to initialize NXBT: {e}")
+                nxbt_init_failed = True
+                print(f"ERROR: Failed to initialize NXBT: {e}")
                 raise
         return nxbt
 
@@ -57,6 +72,21 @@ USER_INFO = {}
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.route('/health')
+def health():
+    """Health check endpoint to verify NXBT is initialized"""
+    global nxbt, nxbt_init_failed
+    
+    if nxbt_init_failed:
+        return {'status': 'error', 'message': 'NXBT initialization failed'}, 500
+    
+    try:
+        nx = get_nxbt()
+        return {'status': 'ok', 'adapters': len(nx.get_available_adapters())}, 200
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}, 500
 
 
 @sio.on('connect')
