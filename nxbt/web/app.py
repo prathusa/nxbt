@@ -70,7 +70,12 @@ def on_disconnect():
 
 @sio.on('shutdown')
 def on_shutdown(index):
-    nxbt.remove_controller(index)
+    try:
+        nxbt.remove_controller(index)
+    except ValueError as e:
+        emit('error', f'Shutdown error: {str(e)}')
+    except Exception as e:
+        emit('error', f'Unexpected shutdown error: {str(e)}')
 
 
 @sio.on('web_create_pro_controller')
@@ -92,18 +97,28 @@ def on_create_controller():
 @sio.on('input')
 def handle_input(message):
     # print("Webapp Input", time.perf_counter())
-    message = json.loads(message)
-    index = message[0]
-    input_packet = message[1]
-    nxbt.set_controller_input(index, input_packet)
+    try:
+        message = json.loads(message)
+        index = message[0]
+        input_packet = message[1]
+        nxbt.set_controller_input(index, input_packet)
+    except ValueError as e:
+        emit('error', f'Controller error: {str(e)}')
+    except Exception as e:
+        emit('error', f'Input error: {str(e)}')
 
 
 @sio.on('macro')
 def handle_macro(message):
-    message = json.loads(message)
-    index = message[0]
-    macro = message[1]
-    nxbt.macro(index, macro)
+    try:
+        message = json.loads(message)
+        index = message[0]
+        macro = message[1]
+        nxbt.macro(index, macro)
+    except ValueError as e:
+        emit('error', f'Controller error: {str(e)}')
+    except Exception as e:
+        emit('error', f'Macro error: {str(e)}')
 
 
 def start_web_app(ip='0.0.0.0', port=8000, usessl=False, cert_path=None):
