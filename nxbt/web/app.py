@@ -14,7 +14,22 @@ import eventlet
 app = Flask(__name__,
             static_url_path='',
             static_folder='static',)
-nxbt = Nxbt()
+
+# Initialize nxbt as None - will be created on first use
+nxbt = None
+nxbt_lock = RLock()
+
+def get_nxbt():
+    """Get or create the Nxbt instance with proper error handling"""
+    global nxbt
+    with nxbt_lock:
+        if nxbt is None:
+            try:
+                nxbt = Nxbt()
+            except Exception as e:
+                print(f"Failed to initialize NXBT: {e}")
+                raise
+        return nxbt
 
 # Configuring/retrieving secret key
 secrets_path = os.path.join(
@@ -51,7 +66,8 @@ def on_connect():
 @sio.on('state')
 def on_state():
     try:
-        state_proxy = nxbt.state.copy()
+        nx = get_nxbt()
+        state_proxy = nx.state.copy()
         state = {}
         for controller in state_proxy.keys():
             state[controller] = state_proxy[controller].copy()
@@ -70,10 +86,13 @@ def on_disconnect():
     print("Disconnected")
     with user_info_lock:
         try:
+            nx = get_nxbt()
             index = USER_INFO[request.sid]["controller_index"]
-            nxbt.remove_controller(index)
+            nx.remove_controller(index)
         except (KeyError, ValueError):
             pass
+        except Exception as e:
+            print(f"Error during disconnect cleanup: {e}")
         finally:
             # Clean up user info regardless
             USER_INFO.pop(request.sid, None)
@@ -82,7 +101,8 @@ def on_disconnect():
 @sio.on('shutdown')
 def on_shutdown(index):
     try:
-        nxbt.remove_controller(index)
+        nx = get_nxbt()
+        nx.remove_controller(index)
         # Clean up user info if this was their controller
         with user_info_lock:
             if request.sid in USER_INFO and USER_INFO[request.sid].get("controller_index") == index:
@@ -97,8 +117,9 @@ def on_shutdown(index):
 def check_controller_health(index):
     """Check if a controller is healthy and return its state"""
     try:
-        if index in nxbt.state:
-            state = nxbt.state[index].get('state')
+        nx = get_nxbt()
+        if index in nx.state:
+            state = nx.state[index].get('state')
             emit('controller_health', {'index': index, 'state': state, 'exists': True})
         else:
             emit('controller_health', {'index': index, 'state': None, 'exists': False})
@@ -114,17 +135,19 @@ def on_create_controller():
     print("Create Controller")
 
     try:
+        nx = get_nxbt()
+        
         # Clean up any existing crashed controller for this session
         with user_info_lock:
             if request.sid in USER_INFO and "controller_index" in USER_INFO[request.sid]:
                 old_index = USER_INFO[request.sid]["controller_index"]
                 try:
-                    nxbt.remove_controller(old_index)
+                    nx.remove_controller(old_index)
                 except (ValueError, KeyError):
                     pass
         
-        reconnect_addresses = nxbt.get_switch_addresses()
-        index = nxbt.create_controller(PRO_CONTROLLER, reconnect_address=reconnect_addresses)
+        reconnect_addresses = nx.get_switch_addresses()
+        index = nx.create_controller(PRO_CONTROLLER, reconnect_address=reconnect_addresses)
 
         with user_info_lock:
             USER_INFO[request.sid]["controller_index"] = index
@@ -138,18 +161,19 @@ def on_create_controller():
 def handle_input(message):
     # print("Webapp Input", time.perf_counter())
     try:
+        nx = get_nxbt()
         message = json.loads(message)
         index = message[0]
         input_packet = message[1]
         
         # Check if controller exists and is not crashed
-        if index in nxbt.state:
-            controller_state = nxbt.state[index].get('state')
+        if index in nx.state:
+            controller_state = nx.state[index].get('state')
             if controller_state == 'crashed':
                 emit('controller_crashed', index)
                 return
         
-        nxbt.set_controller_input(index, input_packet)
+        nx.set_controller_input(index, input_packet)
     except (FileNotFoundError, EOFError, ConnectionRefusedError, BrokenPipeError):
         # Manager died - silently ignore input
         pass
@@ -162,18 +186,19 @@ def handle_input(message):
 @sio.on('macro')
 def handle_macro(message):
     try:
+        nx = get_nxbt()
         message = json.loads(message)
         index = message[0]
         macro = message[1]
         
         # Check if controller exists and is not crashed
-        if index in nxbt.state:
-            controller_state = nxbt.state[index].get('state')
+        if index in nx.state:
+            controller_state = nx.state[index].get('state')
             if controller_state == 'crashed':
                 emit('controller_crashed', index)
                 return
         
-        nxbt.macro(index, macro)
+        nx.macro(index, macro)
     except (FileNotFoundError, EOFError, ConnectionRefusedError, BrokenPipeError):
         # Manager died - emit error
         emit('controller_error', {'index': message[0] if message else None, 'error': 'NXBT manager connection lost'})
