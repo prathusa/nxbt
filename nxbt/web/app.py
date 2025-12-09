@@ -47,7 +47,8 @@ else:
 app.config['SECRET_KEY'] = secret_key
 
 # Starting socket server with Flask app
-sio = SocketIO(app, cookie=False)
+# Explicitly use gevent async mode to match the pywsgi server
+sio = SocketIO(app, cookie=False, async_mode='gevent')
 
 user_info_lock = RLock()
 USER_INFO = {}
