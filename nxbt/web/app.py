@@ -64,18 +64,38 @@ def on_disconnect():
         try:
             index = USER_INFO[request.sid]["controller_index"]
             nxbt.remove_controller(index)
-        except KeyError:
+        except (KeyError, ValueError):
             pass
+        finally:
+            # Clean up user info regardless
+            USER_INFO.pop(request.sid, None)
 
 
 @sio.on('shutdown')
 def on_shutdown(index):
     try:
         nxbt.remove_controller(index)
+        # Clean up user info if this was their controller
+        with user_info_lock:
+            if request.sid in USER_INFO and USER_INFO[request.sid].get("controller_index") == index:
+                USER_INFO[request.sid].pop("controller_index", None)
     except ValueError as e:
         emit('error', f'Shutdown error: {str(e)}')
     except Exception as e:
         emit('error', f'Unexpected shutdown error: {str(e)}')
+
+
+@sio.on('check_controller_health')
+def check_controller_health(index):
+    """Check if a controller is healthy and return its state"""
+    try:
+        if index in nxbt.state:
+            state = nxbt.state[index].get('state')
+            emit('controller_health', {'index': index, 'state': state, 'exists': True})
+        else:
+            emit('controller_health', {'index': index, 'state': None, 'exists': False})
+    except Exception as e:
+        emit('error', f'Health check error: {str(e)}')
 
 
 @sio.on('web_create_pro_controller')
@@ -83,6 +103,15 @@ def on_create_controller():
     print("Create Controller")
 
     try:
+        # Clean up any existing crashed controller for this session
+        with user_info_lock:
+            if request.sid in USER_INFO and "controller_index" in USER_INFO[request.sid]:
+                old_index = USER_INFO[request.sid]["controller_index"]
+                try:
+                    nxbt.remove_controller(old_index)
+                except (ValueError, KeyError):
+                    pass
+        
         reconnect_addresses = nxbt.get_switch_addresses()
         index = nxbt.create_controller(PRO_CONTROLLER, reconnect_address=reconnect_addresses)
 
@@ -101,9 +130,17 @@ def handle_input(message):
         message = json.loads(message)
         index = message[0]
         input_packet = message[1]
+        
+        # Check if controller exists and is not crashed
+        if index in nxbt.state:
+            controller_state = nxbt.state[index].get('state')
+            if controller_state == 'crashed':
+                emit('controller_crashed', index)
+                return
+        
         nxbt.set_controller_input(index, input_packet)
     except ValueError as e:
-        emit('error', f'Controller error: {str(e)}')
+        emit('controller_error', {'index': message[0] if message else None, 'error': str(e)})
     except Exception as e:
         emit('error', f'Input error: {str(e)}')
 
@@ -114,9 +151,17 @@ def handle_macro(message):
         message = json.loads(message)
         index = message[0]
         macro = message[1]
+        
+        # Check if controller exists and is not crashed
+        if index in nxbt.state:
+            controller_state = nxbt.state[index].get('state')
+            if controller_state == 'crashed':
+                emit('controller_crashed', index)
+                return
+        
         nxbt.macro(index, macro)
     except ValueError as e:
-        emit('error', f'Controller error: {str(e)}')
+        emit('controller_error', {'index': message[0] if message else None, 'error': str(e)})
     except Exception as e:
         emit('error', f'Macro error: {str(e)}')
 
