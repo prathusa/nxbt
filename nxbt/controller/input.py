@@ -206,6 +206,18 @@ class InputParser():
             self.post_macro_neutral_cycles -= 1
             return
 
+        # If no macros are queued or running, ensure we're sending neutral state
+        # to keep the connection alive and prevent disconnection
+        if not (self.macro_buffer or self.current_macro or
+                self.current_macro_commands):
+            # Set neutral state - all buttons released, sticks centered
+            self.protocol.set_button_inputs(0, 0, 0)
+            left_center = self.stick_ratio_to_calibrated_position(0, 0, "L_STICK")
+            right_center = self.stick_ratio_to_calibrated_position(0, 0, "R_STICK")
+            self.protocol.set_left_stick_inputs(left_center)
+            self.protocol.set_right_stick_inputs(right_center)
+            return
+
         if (self.macro_buffer or self.current_macro or
               self.current_macro_commands):
             # Check if we can start on a new macro.
