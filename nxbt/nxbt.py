@@ -15,6 +15,7 @@ from .controller import ControllerTypes
 from .bluez import BlueZ, find_objects, toggle_clean_bluez
 from .bluez import replace_mac_addresses
 from .bluez import find_devices_by_alias
+from .bluez import get_stored_switch_addresses
 from .bluez import SERVICE_NAME, ADAPTER_INTERFACE
 from .logging import create_logger
 
@@ -649,13 +650,43 @@ class Nxbt():
 
     def get_switch_addresses(self):
         """Gets the Bluetooth MAC addresses of all
-        previously connected Nintendo Switchs
+        previously connected Nintendo Switches.
+        
+        This method combines addresses from two sources:
+        1. BlueZ discovered devices with alias "Nintendo Switch"
+        2. Stored addresses from previous successful connections
+        
+        The stored addresses are particularly important for reconnection
+        as they persist across system restarts.
 
         :return: A list of Bluetooth MAC addresses
         :rtype: list
         """
-
-        return (find_devices_by_alias("Nintendo Switch"))
+        # Get addresses from BlueZ (currently known devices)
+        bluez_addresses = find_devices_by_alias("Nintendo Switch")
+        
+        # Get stored addresses from previous connections
+        stored_addresses = get_stored_switch_addresses()
+        
+        # Combine and deduplicate (case-insensitive)
+        all_addresses = []
+        seen = set()
+        
+        # Prioritize BlueZ addresses (currently known devices)
+        for addr in bluez_addresses:
+            addr_upper = addr.upper()
+            if addr_upper not in seen:
+                all_addresses.append(addr_upper)
+                seen.add(addr_upper)
+        
+        # Add stored addresses that aren't already in the list
+        for addr in stored_addresses:
+            addr_upper = addr.upper()
+            if addr_upper not in seen:
+                all_addresses.append(addr_upper)
+                seen.add(addr_upper)
+        
+        return all_addresses
 
     @property
     def state(self):

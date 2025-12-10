@@ -391,6 +391,10 @@ class ControllerServer():
                 switch_device_path = self.bt.find_device_by_address(switch_address)
                 if switch_device_path:
                     self.bt.trust_device(switch_device_path)
+                
+                # Save connection info for future reconnection
+                # This stores the adapter's MAC address and Switch address
+                self.bt.save_connection_info(switch_address)
 
                 # Send an empty input report to the Switch to prompt a reply
                 self.protocol.process_commands(None)
@@ -470,8 +474,25 @@ class ControllerServer():
 
         self.state["state"] = "reconnecting"
 
+        # Prepare the adapter for reconnection by restoring the stored MAC address
+        # The Switch remembers the controller's MAC address and will only accept
+        # reconnections from the same MAC that was used during initial pairing
+        mac_restored = self.bt.prepare_for_reconnect()
+        
+        # If MAC was restored, reinitialize the protocol with the new address
+        # This ensures the controller reports the correct MAC to the Switch
+        if mac_restored:
+            self.protocol = ControllerProtocol(
+                self.controller_type,
+                self.bt.address,
+                colour_body=self.colour_body,
+                colour_buttons=self.colour_buttons)
+            self.input.reassign_protocol(self.protocol)
+
         itr = None
         ctrl = None
+        connected_address = None
+        
         if type(reconnect_address) == list:
             for address in reconnect_address:
                 test_itr, test_ctrl = recreate_sockets()
@@ -482,6 +503,8 @@ class ControllerServer():
 
                     itr = test_itr
                     ctrl = test_ctrl
+                    connected_address = address
+                    break
                 except OSError:
                     test_itr.close()
                     test_ctrl.close()
@@ -495,6 +518,7 @@ class ControllerServer():
 
             itr = test_itr
             ctrl = test_ctrl
+            connected_address = reconnect_address
 
         if not itr and not ctrl:
             raise OSError("Unable to reconnect to sockets at the given address(es)",
@@ -511,15 +535,15 @@ class ControllerServer():
         # In this case, non-blocking means it throws a "BlockingIOError"
         # for sending and receiving, instead of blocking
         fcntl.fcntl(itr, fcntl.F_SETFL, os.O_NONBLOCK)
+        
+        # Update connection info after successful reconnection
+        if connected_address:
+            self.bt.save_connection_info(connected_address)
 
         return itr, ctrl
 
     def _on_exit(self):
         try:
             self.bt.close()
-        except Exception:
-            pass
-        try:
-            self.bt.reset_address()
         except Exception:
             pass

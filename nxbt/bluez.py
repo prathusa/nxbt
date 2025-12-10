@@ -6,10 +6,16 @@ import logging
 from shutil import which
 import random
 from pathlib import Path
+import json
 
 import dbus
 import dbus.service
 from dbus.mainloop.glib import DBusGMainLoop
+
+
+# Path for storing connection state (MAC addresses, etc.)
+NXBT_STATE_DIR = Path.home() / ".nxbt"
+NXBT_STATE_FILE = NXBT_STATE_DIR / "connection_state.json"
 
 
 SERVICE_NAME = "org.bluez"
@@ -232,6 +238,133 @@ def get_random_controller_mac():
         return str(hex_number)
     
     return f"7C:BB:8A:{seg()}:{seg()}:{seg()}"
+
+
+def load_connection_state():
+    """Loads the saved connection state from disk.
+    
+    The connection state includes:
+    - adapter_mac: The MAC address the adapter was using when connected
+    - switch_addresses: List of Switch MAC addresses we've connected to
+    - adapter_original_mac: The original MAC address of the adapter
+    
+    :return: A dictionary containing the connection state, or empty dict if none exists
+    :rtype: dict
+    """
+    try:
+        if NXBT_STATE_FILE.exists():
+            with open(NXBT_STATE_FILE, 'r') as f:
+                return json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        logging.getLogger('nxbt').debug(f"Failed to load connection state: {e}")
+    return {}
+
+
+def save_connection_state(state):
+    """Saves the connection state to disk.
+    
+    :param state: A dictionary containing the connection state
+    :type state: dict
+    """
+    try:
+        NXBT_STATE_DIR.mkdir(parents=True, exist_ok=True)
+        with open(NXBT_STATE_FILE, 'w') as f:
+            json.dump(state, f, indent=2)
+    except IOError as e:
+        logging.getLogger('nxbt').debug(f"Failed to save connection state: {e}")
+
+
+def update_connection_state(adapter_path, adapter_mac, switch_address, original_mac=None):
+    """Updates the connection state with new connection information.
+    
+    This function is called after a successful connection to store the
+    MAC addresses for future reconnection attempts.
+    
+    :param adapter_path: The D-Bus path of the adapter (e.g., /org/bluez/hci0)
+    :type adapter_path: str
+    :param adapter_mac: The MAC address the adapter is currently using
+    :type adapter_mac: str
+    :param switch_address: The MAC address of the connected Switch
+    :type switch_address: str
+    :param original_mac: The original MAC address of the adapter before any changes
+    :type original_mac: str, optional
+    """
+    state = load_connection_state()
+    
+    adapter_id = adapter_path.split('/')[-1] if adapter_path else 'unknown'
+    
+    if 'adapters' not in state:
+        state['adapters'] = {}
+    
+    if adapter_id not in state['adapters']:
+        state['adapters'][adapter_id] = {
+            'original_mac': original_mac or adapter_mac,
+            'controller_mac': adapter_mac,
+            'switch_addresses': []
+        }
+    
+    # Update the controller MAC (the MAC we're using to connect)
+    state['adapters'][adapter_id]['controller_mac'] = adapter_mac
+    
+    # Store original MAC if provided and not already set
+    if original_mac and not state['adapters'][adapter_id].get('original_mac'):
+        state['adapters'][adapter_id]['original_mac'] = original_mac
+    
+    # Add the Switch address if not already in the list
+    if switch_address and switch_address.upper() not in [
+            addr.upper() for addr in state['adapters'][adapter_id]['switch_addresses']]:
+        state['adapters'][adapter_id]['switch_addresses'].append(switch_address.upper())
+    
+    save_connection_state(state)
+    logging.getLogger('nxbt').debug(
+        f"Updated connection state: adapter={adapter_id}, mac={adapter_mac}, switch={switch_address}")
+
+
+def get_adapter_controller_mac(adapter_path):
+    """Gets the stored controller MAC address for an adapter.
+    
+    This is the MAC address that was used during the last successful
+    connection and should be used for reconnection.
+    
+    :param adapter_path: The D-Bus path of the adapter
+    :type adapter_path: str
+    :return: The stored controller MAC address, or None if not found
+    :rtype: str or None
+    """
+    state = load_connection_state()
+    adapter_id = adapter_path.split('/')[-1] if adapter_path else 'unknown'
+    
+    if 'adapters' in state and adapter_id in state['adapters']:
+        return state['adapters'][adapter_id].get('controller_mac')
+    return None
+
+
+def get_stored_switch_addresses(adapter_path=None):
+    """Gets all stored Switch addresses, optionally filtered by adapter.
+    
+    :param adapter_path: The D-Bus path of the adapter to filter by, or None for all
+    :type adapter_path: str, optional
+    :return: A list of Switch MAC addresses
+    :rtype: list
+    """
+    state = load_connection_state()
+    addresses = []
+    
+    if 'adapters' not in state:
+        return addresses
+    
+    if adapter_path:
+        adapter_id = adapter_path.split('/')[-1]
+        if adapter_id in state['adapters']:
+            addresses = state['adapters'][adapter_id].get('switch_addresses', [])
+    else:
+        # Get all addresses from all adapters
+        for adapter_data in state['adapters'].values():
+            addresses.extend(adapter_data.get('switch_addresses', []))
+        # Remove duplicates while preserving order
+        addresses = list(dict.fromkeys(addresses))
+    
+    return addresses
 
 
 def replace_mac_addresses(adapter_paths, addresses):
@@ -471,10 +604,22 @@ class BlueZ():
                 self.device_path),
             ADAPTER_INTERFACE)
 
+        # Store the original MAC address for potential restoration
+        self._original_address = self.address
+        
         # Register auto-accept agent for handling pairing/authorization
         self.agent = None
         self.agent_path = "/nxbt/agent"
         self._register_agent()
+
+    @property
+    def original_address(self):
+        """Gets the original Bluetooth MAC address of the adapter.
+        
+        :return: The original MAC address before any modifications
+        :rtype: string
+        """
+        return self._original_address
 
     @property
     def address(self):
@@ -503,12 +648,63 @@ class BlueZ():
                             "If you can, please install this tool, as " +
                             "it is required for proper functionality.")
         # Reverse MAC (element position-wise) for use with hcitool
-        mac = mac.split(":")
+        mac_parts = mac.split(":")
         cmds = ['hcitool', '-i', self.device_id, 'cmd', '0x3f', '0x001',
-                f'0x{mac[5]}',f'0x{mac[4]}',f'0x{mac[3]}',f'0x{mac[2]}',
-                f'0x{mac[1]}',f'0x{mac[0]}']
+                f'0x{mac_parts[5]}',f'0x{mac_parts[4]}',f'0x{mac_parts[3]}',f'0x{mac_parts[2]}',
+                f'0x{mac_parts[1]}',f'0x{mac_parts[0]}']
         _run_command(cmds)
         _run_command(['hciconfig', self.device_id, 'reset'])
+        self.logger.debug(f"Set adapter MAC address to {mac}")
+
+    def prepare_for_reconnect(self, switch_address=None):
+        """Prepares the adapter for reconnection by restoring the stored MAC address.
+        
+        This method checks if we have a stored controller MAC address from a previous
+        successful connection and sets the adapter to use that MAC address. This is
+        necessary because the Switch remembers the controller's MAC address and will
+        only accept reconnections from the same MAC.
+        
+        :param switch_address: Optional Switch address to look up the specific MAC used
+        :type switch_address: str, optional
+        :return: True if MAC was restored, False otherwise
+        :rtype: bool
+        """
+        stored_mac = get_adapter_controller_mac(self.device_path)
+        
+        if stored_mac:
+            current_mac = self.address
+            if current_mac.upper() != stored_mac.upper():
+                self.logger.debug(
+                    f"Restoring controller MAC for reconnection: {stored_mac} (current: {current_mac})")
+                try:
+                    self.set_address(stored_mac)
+                    return True
+                except Exception as e:
+                    self.logger.debug(f"Failed to restore MAC address: {e}")
+                    return False
+            else:
+                self.logger.debug(f"MAC address already matches stored value: {stored_mac}")
+                return True
+        else:
+            self.logger.debug("No stored MAC address found for this adapter")
+            return False
+
+    def save_connection_info(self, switch_address):
+        """Saves the current connection information for future reconnection.
+        
+        This should be called after a successful connection to store the
+        adapter's MAC address and the Switch's address.
+        
+        :param switch_address: The MAC address of the connected Switch
+        :type switch_address: str
+        """
+        update_connection_state(
+            self.device_path,
+            self.address,
+            switch_address,
+            self._original_address
+        )
+        self.logger.debug(f"Saved connection info: adapter={self.address}, switch={switch_address}")
 
     def set_class(self, device_class):
         if which("hciconfig") is None:

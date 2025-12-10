@@ -286,10 +286,18 @@ nx.remove_controller(controller_index)
 **Reconnecting to a Switch**
 ```python
 # Get a list of all previously connected Switches and pass it as a reconnect_address argument
+# Note: The Switch must be on the Home Screen (not Change Grip/Order menu) for reconnection
+# NXBT automatically restores the correct MAC address from previous connections
 controller_index = nx.create_controller(
     nxbt.PRO_CONTROLLER,
     reconnect_address=nx.get_switch_addresses())
 ```
+
+**Important Reconnection Notes:**
+- First connection must be done from the "Change Grip/Order" menu
+- Subsequent reconnections work from the Home Screen
+- NXBT stores connection state in `~/.nxbt/connection_state.json`
+- If reconnection fails, delete the state file and re-pair from Change Grip/Order
 
 **Stopping or Clearing Macros**
 ```python
