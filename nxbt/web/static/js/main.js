@@ -190,7 +190,14 @@ let PRO_CONTROLLER_DISPLAY = {
 /* Socket.IO Functionality */
 /**********************************************/
 
-let socket = io();
+let socket = io({
+    reconnection: true,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    timeout: 20000,
+    transports: ['websocket', 'polling']  // Prefer websocket to reduce packet issues
+});
 
 // Request to the state at 1Hz
 socket.emit('state');
@@ -204,6 +211,18 @@ socket.on('state', function(state) {
 
 socket.on('connect', function() {
     console.log("Connected");
+});
+
+socket.on('disconnect', function(reason) {
+    console.log("Disconnected:", reason);
+    // Reset input packet to prevent stale data on reconnect
+    INPUT_PACKET_OLD = JSON.parse(JSON.stringify(INPUT_PACKET));
+});
+
+socket.on('reconnect', function(attemptNumber) {
+    console.log("Reconnected after", attemptNumber, "attempts");
+    // Re-request state after reconnection
+    socket.emit('state');
 });
 
 checkForLoadInterval = false;

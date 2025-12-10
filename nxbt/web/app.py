@@ -104,7 +104,11 @@ app.config['SECRET_KEY'] = secret_key
 
 # Starting socket server with Flask app
 # Explicitly use gevent async mode to match the pywsgi server
-sio = SocketIO(app, cookie=False, async_mode='gevent')
+# max_http_buffer_size increased to handle rapid input events
+sio = SocketIO(app, cookie=False, async_mode='gevent', 
+               max_http_buffer_size=10*1024*1024,  # 10MB
+               ping_timeout=60,
+               ping_interval=25)
 
 user_info_lock = RLock()
 USER_INFO = {}
