@@ -106,6 +106,11 @@ class InputParser():
         # that can cause disconnections
         self.macro_cooldown_time = 0.1  # 100ms between macros
         self.last_macro_end_time = 0
+        
+        # Post-macro neutral state tracking
+        # Ensures neutral inputs are sent after macro completion
+        self.post_macro_neutral_cycles = 0
+        self.post_macro_neutral_required = 10  # Send neutral for ~10 cycles (~75ms)
 
     def buffer_macro(self, macro, macro_id):
 
@@ -186,8 +191,22 @@ class InputParser():
         if dumps(self.controller_input) != dumps(DIRECT_INPUT_IDLE_PACKET):
             self.parse_controller_input(self.controller_input)
             self.controller_input = None
+            # Reset post-macro neutral cycles when direct input is used
+            self.post_macro_neutral_cycles = 0
+            return
 
-        elif (self.macro_buffer or self.current_macro or
+        # Handle post-macro neutral state
+        if self.post_macro_neutral_cycles > 0:
+            # Continue sending neutral inputs for a few cycles after macro completion
+            self.protocol.set_button_inputs(0, 0, 0)
+            left_center = self.stick_ratio_to_calibrated_position(0, 0, "L_STICK")
+            right_center = self.stick_ratio_to_calibrated_position(0, 0, "R_STICK")
+            self.protocol.set_left_stick_inputs(left_center)
+            self.protocol.set_right_stick_inputs(right_center)
+            self.post_macro_neutral_cycles -= 1
+            return
+
+        if (self.macro_buffer or self.current_macro or
               self.current_macro_commands):
             # Check if we can start on a new macro.
             if not self.current_macro and self.macro_buffer:
@@ -201,7 +220,12 @@ class InputParser():
                     self.current_macro = self.parse_macro(macro[0])
                     self.current_macro_id = macro[1]
                 else:
-                    # Not enough time has passed, return without processing
+                    # Not enough time has passed, send neutral inputs while waiting
+                    self.protocol.set_button_inputs(0, 0, 0)
+                    left_center = self.stick_ratio_to_calibrated_position(0, 0, "L_STICK")
+                    right_center = self.stick_ratio_to_calibrated_position(0, 0, "R_STICK")
+                    self.protocol.set_left_stick_inputs(left_center)
+                    self.protocol.set_right_stick_inputs(right_center)
                     return
 
             # Check if we can load the next set of commands
@@ -222,10 +246,21 @@ class InputParser():
             if time_delta > self.macro_timer_length:
                 self.current_macro_commands = None
                 # Check if we're done the current macro
-                if not self.current_macro and state:
-                    finished = state["finished_macros"]
-                    finished.append(self.current_macro_id)
-                    state["finished_macros"] = finished
+                if not self.current_macro:
+                    # Start post-macro neutral state period
+                    self.post_macro_neutral_cycles = self.post_macro_neutral_required
+                    
+                    # Reset all button inputs to neutral state when macro completes
+                    self.protocol.set_button_inputs(0, 0, 0)
+                    left_center = self.stick_ratio_to_calibrated_position(0, 0, "L_STICK")
+                    right_center = self.stick_ratio_to_calibrated_position(0, 0, "R_STICK")
+                    self.protocol.set_left_stick_inputs(left_center)
+                    self.protocol.set_right_stick_inputs(right_center)
+                    
+                    if state:
+                        finished = state["finished_macros"]
+                        finished.append(self.current_macro_id)
+                        state["finished_macros"] = finished
                     # Record the time when this macro ended
                     self.last_macro_end_time = perf_counter()
 
