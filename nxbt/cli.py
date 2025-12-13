@@ -51,7 +51,11 @@ parser.add_argument('--usessl', required=False, default=False, action='store_tru
 parser.add_argument('--certpath', required=False, default=None, type=str,
                     help="""Specifies the folder location for SSL certificates used
                     in the webapp. Certificates in this folder should be in the form of
-                    a 'cert.pem' and 'key.pem' pair.""")                
+                    a 'cert.pem' and 'key.pem' pair.""")
+parser.add_argument('-k', '--keep-alive', required=False, default=False, action='store_true',
+                    help="""Used in conjunction with the macro command. If specified,
+                    the controller connection will be kept open after the macro finishes,
+                    allowing you to run additional macros in succession.""")
 args = parser.parse_args()
 
 
@@ -293,9 +297,19 @@ def macro():
             print(nx.state[index]["errors"])
             break
         if macro_id in nx.state[index]["finished_macros"]:
-            print("Finished running macro. Exiting...")
+            print("Finished running macro.")
             break
         sleep(1/30)
+
+    if args.keep_alive:
+        print("Keeping connection alive. Press Ctrl+C to exit.")
+        try:
+            while nx.state[index]["state"] == "connected":
+                sleep(1)
+        except KeyboardInterrupt:
+            print("\nExiting...")
+    else:
+        print("Exiting...")
 
 
 def list_switch_addresses():
