@@ -21,7 +21,7 @@ nxbt = None
 nxbt_lock = RLock()
 nxbt_init_failed = False
 nxbt_restart_count = 0
-MAX_NXBT_RESTARTS = 3
+MAX_NXBT_RESTARTS = None  # Disabled - unlimited restarts allowed
 
 def reset_nxbt():
     """Reset the NXBT instance (for recovery from crashes)"""
@@ -39,10 +39,8 @@ def reset_nxbt():
         nxbt_init_failed = False
         nxbt_restart_count += 1
         
-        if nxbt_restart_count > MAX_NXBT_RESTARTS:
-            print(f"ERROR: NXBT has been restarted {MAX_NXBT_RESTARTS} times. Manual intervention required.")
-            nxbt_init_failed = True
-            raise RuntimeError("NXBT restart limit exceeded")
+        # Log restart count but don't limit (MAX_NXBT_RESTARTS=None disables limit)
+        print(f"NXBT restart #{nxbt_restart_count}")
 
 def get_nxbt():
     """Get or create the Nxbt instance with proper error handling"""
