@@ -198,10 +198,18 @@ class ControllerServer():
 
 
     def save_connection(self, error, state=None):
+        """Attempts to reconnect to the Switch indefinitely until successful.
+        
+        This method will keep trying to reconnect to the same Switch address
+        without any retry limit, handling the frequent disconnections that
+        can occur with Bluetooth connections.
+        """
 
-        while self.reconnect_counter < 2:
+        while True:
             try:
-                self.logger.debug("Attempting to reconnect")
+                self.reconnect_counter += 1
+                self.logger.debug(f"Attempting to reconnect (attempt #{self.reconnect_counter})")
+                
                 # Reinitialize the protocol
                 self.protocol = ControllerProtocol(
                     self.controller_type,
@@ -209,6 +217,7 @@ class ControllerServer():
                     colour_body=self.colour_body,
                     colour_buttons=self.colour_buttons)
                 self.input.reassign_protocol(self.protocol)
+                
                 if self.lock:
                     self.lock.acquire()
                 try:
@@ -252,54 +261,19 @@ class ControllerServer():
                             time.sleep(1/15)
 
                     self.state["state"] = "connected"
+                    self.reconnect_counter = 0  # Reset counter on successful reconnection
+                    self.logger.debug("Reconnection successful")
                     return itr, ctrl
                 finally:
                     if self.lock:
                         self.lock.release()
-            except OSError:
-                self.reconnect_counter += 1
-                self.logger.debug(error)
-                time.sleep(0.5)
-
-        # If we can't reconnect, transition to attempting
-        # to connect to any Switch.
-        self.logger.debug("Connecting to any Switch")
-        self.reconnect_counter = 0
-
-        # Reinitialize initial communication overload protections
-        self.tick = 1
-
-        # Reinitialize the protocol
-        self.protocol = ControllerProtocol(
-            self.controller_type,
-            self.bt.address,
-            colour_body=self.colour_body,
-            colour_buttons=self.colour_buttons)
-        self.input.reassign_protocol(self.protocol)
-
-        # Since we were forced to attempt a reconnection
-        # we need to press the L/SL and R/SR buttons before
-        # we can proceed with any input.
-        if self.controller_type == ControllerTypes.PRO_CONTROLLER:
-            self.input.current_macro_commands = "L R 0.0s".strip(" ").split(" ")
-        elif self.controller_type == ControllerTypes.JOYCON_L:
-            self.input.current_macro_commands = "JCL_SL JCL_SR 0.0s".strip(" ").split(" ")
-        elif self.controller_type == ControllerTypes.JOYCON_R:
-            self.input.current_macro_commands = "JCR_SL JCR_SR 0.0s".strip(" ").split(" ")
-
-        if self.lock:
-            self.lock.acquire()
-        try:
-            itr, ctrl = self.connect()
-        finally:
-            if self.lock:
-                self.lock.release()
-
-        self.state["state"] = "connected"
-
-        self.switch_address = itr.getsockname()[0]
-
-        return itr, ctrl
+            except OSError as e:
+                self.logger.debug(f"Reconnection attempt failed: {e}")
+                # Exponential backoff with a cap to avoid overwhelming the system
+                # but keep trying indefinitely
+                wait_time = min(0.5 * (1.5 ** min(self.reconnect_counter, 10)), 30)
+                self.logger.debug(f"Waiting {wait_time:.1f}s before next attempt...")
+                time.sleep(wait_time)
 
     def connection_reset_watchdog(self):
 
