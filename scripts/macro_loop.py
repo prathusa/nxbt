@@ -42,7 +42,10 @@ def main():
     # Wait for the controller to connect
     nx.wait_for_connection(controller_index)
     
-    print("Connected! Running macro...")
+    print("Connected!")
+    input("Navigate to your game, then press Enter to start the macro...")
+    
+    print("Running macro...")
     
     # Run the macro
     nx.macro(controller_index, MACRO, block=True)
