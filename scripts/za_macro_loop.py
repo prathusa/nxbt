@@ -8,7 +8,7 @@ import nxbt
 MACRO = """
 LOOP 10000000
     ZL 1s
-    A 1S
+    A 0.5S
     0.5S
 """
 
