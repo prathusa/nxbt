@@ -776,6 +776,13 @@ class _ControllerManager():
         controller_state["type"] = str(controller_type)
         controller_state["adapter_path"] = adapter_path
         controller_state["last_connection"] = None
+        controller_state["macro_progress"] = {
+            "running": False,
+            "progress": 0,
+            "current_line": 0,
+            "total_lines": 0,
+            "queued_macros": 0
+        }
 
         self._controller_queues[index] = controller_queue
 

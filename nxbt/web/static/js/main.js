@@ -13,6 +13,11 @@ let HTML_LOADER = document.getElementById("loader");
 let HTML_LOADER_TEXT = document.getElementById("loader-text");
 let HTML_CONTROLLER_CONFIG = document.getElementById("controller-config");
 let HTML_MACRO_TEXT = document.getElementById("macro-text");
+let HTML_MACRO_PROGRESS_CONTAINER = document.getElementById("macro-progress-container");
+let HTML_MACRO_PROGRESS_BAR = document.getElementById("macro-progress-bar");
+let HTML_MACRO_PROGRESS_PERCENT = document.getElementById("macro-progress-percent");
+let HTML_MACRO_PROGRESS_LINES = document.getElementById("macro-progress-lines");
+let HTML_MACRO_PROGRESS_QUEUED = document.getElementById("macro-progress-queued");
 let HTML_STATUS_INDICATOR = document.getElementById("status-indicator");
 let HTML_STATUS_INDICATOR_LIGHT = document.getElementById("status-indicator-light");
 let HTML_STATUS_INDICATOR_TEXT = document.getElementById("status-indicator-text");
@@ -199,14 +204,32 @@ let socket = io({
     transports: ['websocket', 'polling']  // Prefer websocket to reduce packet issues
 });
 
-// Request to the state at 1Hz
+// Request to the state at 1Hz (increases to 5Hz when macro is running)
 socket.emit('state');
 let stateInterval = setInterval(function() {
     socket.emit('state');
 }, 1000);
 
+// Higher frequency state updates when macro is running
+let macroStateInterval = null;
+function startMacroStatePolling() {
+    if (macroStateInterval === null) {
+        macroStateInterval = setInterval(function() {
+            socket.emit('state');
+        }, 200);  // 5Hz for smoother progress updates
+    }
+}
+
+function stopMacroStatePolling() {
+    if (macroStateInterval !== null) {
+        clearInterval(macroStateInterval);
+        macroStateInterval = null;
+    }
+}
+
 socket.on('state', function(state) {
     STATE = state;
+    updateMacroProgress();
 });
 
 socket.on('connect', function() {
@@ -708,6 +731,43 @@ function eventLoop() {
 function sendMacro() {
     let macro = HTML_MACRO_TEXT.value.toUpperCase();
     socket.emit('macro', JSON.stringify([NXBT_CONTROLLER_INDEX, macro]));
+}
+
+function updateMacroProgress() {
+    if (!STATE || !STATE[NXBT_CONTROLLER_INDEX]) {
+        HTML_MACRO_PROGRESS_CONTAINER.classList.add('hidden');
+        stopMacroStatePolling();
+        return;
+    }
+
+    let macroProgress = STATE[NXBT_CONTROLLER_INDEX].macro_progress;
+    if (!macroProgress) {
+        HTML_MACRO_PROGRESS_CONTAINER.classList.add('hidden');
+        stopMacroStatePolling();
+        return;
+    }
+
+    if (macroProgress.running || macroProgress.queued_macros > 0) {
+        HTML_MACRO_PROGRESS_CONTAINER.classList.remove('hidden');
+        startMacroStatePolling();  // Enable faster updates during macro execution
+        
+        // Update progress bar
+        HTML_MACRO_PROGRESS_BAR.style.width = macroProgress.progress + '%';
+        HTML_MACRO_PROGRESS_PERCENT.innerHTML = macroProgress.progress + '%';
+        
+        // Update line count
+        HTML_MACRO_PROGRESS_LINES.innerHTML = 'Line ' + macroProgress.current_line + ' / ' + macroProgress.total_lines;
+        
+        // Update queued macros
+        if (macroProgress.queued_macros > 0) {
+            HTML_MACRO_PROGRESS_QUEUED.innerHTML = macroProgress.queued_macros + ' macro(s) queued';
+        } else {
+            HTML_MACRO_PROGRESS_QUEUED.innerHTML = '';
+        }
+    } else {
+        HTML_MACRO_PROGRESS_CONTAINER.classList.add('hidden');
+        stopMacroStatePolling();  // Return to normal polling rate
+    }
 }
 
 /**********************************************/

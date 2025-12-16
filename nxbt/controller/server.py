@@ -153,6 +153,9 @@ class ControllerServer():
 
             self.protocol.process_commands(reply)
             self.input.set_protocol_input(state=self.state)
+            
+            # Update macro progress in state
+            self.state["macro_progress"] = self.input.get_macro_progress()
 
             msg = self.protocol.get_report()
 

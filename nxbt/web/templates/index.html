@@ -207,6 +207,20 @@
                     </p>
                     <textarea id="macro-text" class="mono" placeholder="Type Your Macro Here" onfocus="disableKeyHandlers()" onblur="enableKeyHandlers()"></textarea>
                     <button onclick="sendMacro()">Run Macro</button>
+                    
+                    <div id="macro-progress-container" class="hidden surface-lighter">
+                        <div id="macro-progress-header">
+                            <span id="macro-progress-label">Macro Progress</span>
+                            <span id="macro-progress-percent">0%</span>
+                        </div>
+                        <div id="macro-progress-bar-wrapper">
+                            <div id="macro-progress-bar"></div>
+                        </div>
+                        <div id="macro-progress-details">
+                            <span id="macro-progress-lines">Line 0 / 0</span>
+                            <span id="macro-progress-queued"></span>
+                        </div>
+                    </div>
                 </div>
             </section>
 

@@ -111,6 +111,10 @@ class InputParser():
         # Ensures neutral inputs are sent after macro completion
         self.post_macro_neutral_cycles = 0
         self.post_macro_neutral_required = 10  # Send neutral for ~10 cycles (~75ms)
+        
+        # Macro progress tracking
+        self.total_macro_lines = 0
+        self.completed_macro_lines = 0
 
     def buffer_macro(self, macro, macro_id):
 
@@ -154,8 +158,33 @@ class InputParser():
         self.macro_timer_length = 0
         self.macro_timer_start = 0
         self.macro_buffer = []
+        self.total_macro_lines = 0
+        self.completed_macro_lines = 0
 
         return
+    
+    def get_macro_progress(self):
+        """Returns the current macro progress as a dictionary.
+        
+        :return: A dictionary with progress information
+        :rtype: dict
+        """
+        if self.total_macro_lines == 0:
+            return {
+                "running": False,
+                "progress": 0,
+                "current_line": 0,
+                "total_lines": 0,
+                "queued_macros": len(self.macro_buffer)
+            }
+        
+        return {
+            "running": True,
+            "progress": int((self.completed_macro_lines / self.total_macro_lines) * 100),
+            "current_line": self.completed_macro_lines,
+            "total_lines": self.total_macro_lines,
+            "queued_macros": len(self.macro_buffer)
+        }
 
     def set_controller_input(self, controller_input):
 
@@ -231,6 +260,9 @@ class InputParser():
                     macro = self.macro_buffer.pop(0)
                     self.current_macro = self.parse_macro(macro[0])
                     self.current_macro_id = macro[1]
+                    # Track total lines for progress
+                    self.total_macro_lines = len(self.current_macro)
+                    self.completed_macro_lines = 0
                 else:
                     # Not enough time has passed, send neutral inputs while waiting
                     self.protocol.set_button_inputs(0, 0, 0)
@@ -257,6 +289,8 @@ class InputParser():
             time_delta = perf_counter() - self.macro_timer_start
             if time_delta > self.macro_timer_length:
                 self.current_macro_commands = None
+                # Track completed lines for progress
+                self.completed_macro_lines += 1
                 # Check if we're done the current macro
                 if not self.current_macro:
                     # Start post-macro neutral state period
