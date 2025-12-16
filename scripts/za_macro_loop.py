@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
 """
-Script that farms XP in Pokemon Legends ZA at Resturant Le Nah
+Script that farms XP in Pokemon Legends ZA at Restaurant Le Nah
+Uses Python API for precise button control - holds ZL while pressing A and Y
 """
 
 import nxbt
-
-MACRO = """
-LOOP 10000000
-    ZL&
-    A 0.5S
-    Y 0.5S
-    0.5S
-    ZL
-"""
+import time
+from tqdm import tqdm
 
 def main():
     # Initialize NXBT
@@ -41,10 +35,19 @@ def main():
     print("Connected!")
     input("Navigate to your game, then press Enter to start the macro...")
     
-    print("Running macro...")
-    
-    # Run the macro
-    nx.macro(controller_index, MACRO, block=True)
+    try:
+        for _ in tqdm(range(10000000), desc="Farming XP", unit="loop"):
+            # Hold ZL + press A
+            nx.press_buttons(controller_index, [nxbt.Buttons.ZL, nxbt.Buttons.A], down=0.5, up=0.1, block=True)
+            
+            # Hold ZL + press Y
+            nx.press_buttons(controller_index, [nxbt.Buttons.ZL, nxbt.Buttons.Y], down=0.5, up=0.1, block=True)
+            
+            # Small delay before next loop
+            time.sleep(0.5)
+                
+    except KeyboardInterrupt:
+        print("\nMacro stopped by user")
     
     print("Macro complete!")
 
