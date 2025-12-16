@@ -7,9 +7,11 @@ import nxbt
 
 MACRO = """
 LOOP 10000000
-    ZL 1s
+    ZL&
     A 0.5S
+    Y 0.5S
     0.5S
+    ZL
 """
 
 def main():
