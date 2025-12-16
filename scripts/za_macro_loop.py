@@ -9,7 +9,7 @@ MACRO = """
 LOOP 10000000
     ZL 0.3s
     A 0.3s
-    1s
+    A 0.5s
     ZL 0.3s
     Y 0.3s
     0.3s
