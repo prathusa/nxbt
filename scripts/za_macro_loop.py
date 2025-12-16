@@ -6,10 +6,10 @@ Script that farms XP in Pokemon Legends ZA at Resturant Le Nah
 import nxbt
 
 MACRO = """
-LOOP 1000000000
+LOOP 10000000
     ZL 0.3s
     A 0.3s
-    0.3s
+    1s
     ZL 0.3s
     Y 0.3s
     0.3s
